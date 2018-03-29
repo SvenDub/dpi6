@@ -1,11 +1,8 @@
 package nl.svendubbeld.fontys.bank;
 
-import com.rabbitmq.client.*;
-import nl.svendubbeld.fontys.Queues;
 import nl.svendubbeld.fontys.messaging.requestreply.RequestReply;
 import nl.svendubbeld.fontys.model.bank.BankInterestReply;
 import nl.svendubbeld.fontys.model.bank.BankInterestRequest;
-import org.apache.commons.lang3.SerializationUtils;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -26,7 +23,7 @@ public class JMSBankFrame extends JFrame {
     private JTextField tfReply;
     private DefaultListModel<RequestReply<BankInterestRequest, BankInterestReply>> listModel = new DefaultListModel<>();
 
-    private ConnectionFactory rabbitFactory;
+    private LoanBrokerAppGateway loanBrokerAppGateway;
 
     /**
      * Launch the application.
@@ -46,15 +43,6 @@ public class JMSBankFrame extends JFrame {
      * Create the frame.
      */
     public JMSBankFrame() throws IOException, TimeoutException {
-        rabbitFactory = new ConnectionFactory();
-        rabbitFactory.setHost("127.0.0.1");
-
-        Connection connection = rabbitFactory.newConnection();
-        Channel channel = connection.createChannel();
-
-        channel.queueDeclare(Queues.BANK_INTEREST_REQUEST, true, false, false, null);
-        channel.queueDeclare(Queues.BANK_INTEREST_REPLY, true, false, false, null);
-
         setTitle("JMS Bank - ABN AMRO");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setBounds(100, 100, 450, 300);
@@ -100,15 +88,15 @@ public class JMSBankFrame extends JFrame {
 
         JButton btnSendReply = new JButton("send reply");
         btnSendReply.addActionListener(e -> {
-            RequestReply<BankInterestRequest, BankInterestReply> rr = list.getSelectedValue();
-            double interest = Double.parseDouble((tfReply.getText()));
+            var rr = list.getSelectedValue();
+            var interest = Double.parseDouble((tfReply.getText()));
             if (rr != null) {
-                BankInterestReply reply = new BankInterestReply(rr.getRequest().getId(), interest, "ABN AMRO");
+                var reply = new BankInterestReply(rr.getRequest().getId(), interest, "ABN AMRO");
                 rr.setReply(reply);
                 list.repaint();
 
                 try {
-                    channel.basicPublish("", Queues.BANK_INTEREST_REPLY, null, SerializationUtils.serialize(reply));
+                    loanBrokerAppGateway.sendReply(reply);
                 } catch (IOException e1) {
                     e1.printStackTrace();
                 }
@@ -120,15 +108,9 @@ public class JMSBankFrame extends JFrame {
         gbcBtnSendReply.gridy = 1;
         contentPane.add(btnSendReply, gbcBtnSendReply);
 
-        Consumer consumer = new DefaultConsumer(channel) {
-            @Override
-            public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
-                BankInterestRequest request = SerializationUtils.deserialize(body);
+        loanBrokerAppGateway = new LoanBrokerAppGateway();
 
-                listModel.addElement(new RequestReply<>(request, null));
-            }
-        };
-        channel.basicConsume(Queues.BANK_INTEREST_REQUEST, true, consumer);
+        loanBrokerAppGateway.onBankInterestRequestReceived(request -> listModel.addElement(new RequestReply<>(request, null)));
     }
 
 }

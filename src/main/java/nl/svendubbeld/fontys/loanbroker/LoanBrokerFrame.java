@@ -1,12 +1,9 @@
 package nl.svendubbeld.fontys.loanbroker;
 
-import com.rabbitmq.client.*;
-import nl.svendubbeld.fontys.Queues;
 import nl.svendubbeld.fontys.model.bank.BankInterestReply;
 import nl.svendubbeld.fontys.model.bank.BankInterestRequest;
 import nl.svendubbeld.fontys.model.loan.LoanReply;
 import nl.svendubbeld.fontys.model.loan.LoanRequest;
-import org.apache.commons.lang3.SerializationUtils;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -27,7 +24,8 @@ public class LoanBrokerFrame extends JFrame {
     private DefaultListModel<JListLine> listModel = new DefaultListModel<>();
     private JList<JListLine> list;
 
-    private ConnectionFactory rabbitFactory;
+    private BankAppGateway bankAppGateway;
+    private LoanClientAppGateway loanClientAppGateway;
 
     private int nextId = 1;
 
@@ -47,15 +45,6 @@ public class LoanBrokerFrame extends JFrame {
      * Create the frame.
      */
     public LoanBrokerFrame() throws IOException, TimeoutException {
-        rabbitFactory = new ConnectionFactory();
-        rabbitFactory.setHost("127.0.0.1");
-
-        Connection connection = rabbitFactory.newConnection();
-        Channel channel = connection.createChannel();
-
-        channel.queueDeclare(Queues.LOAN_REQUEST, true, false, false, null);
-        channel.queueDeclare(Queues.BANK_INTEREST_REPLY, true, false, false, null);
-
         setTitle("Loan Broker");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setBounds(100, 100, 450, 300);
@@ -81,32 +70,23 @@ public class LoanBrokerFrame extends JFrame {
         list = new JList<>(listModel);
         scrollPane.setViewportView(list);
 
-        Consumer loanRequestConsumer = new DefaultConsumer(channel) {
-            @Override
-            public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
-                LoanRequest request = SerializationUtils.deserialize(body);
+        bankAppGateway = new BankAppGateway();
+        bankAppGateway.onBankReplyReceived(reply -> {
+            var loanRequest = getLoanRequest(reply.getRequestId());
 
-                add(request);
-                BankInterestRequest bankInterestRequest = new BankInterestRequest(nextId++, request.getId(), request.getAmount(), request.getTime());
-                add(request, bankInterestRequest);
+            add(loanRequest, reply);
 
-                channel.basicPublish("", Queues.BANK_INTEREST_REQUEST, null, SerializationUtils.serialize(bankInterestRequest));
-            }
-        };
-        channel.basicConsume(Queues.LOAN_REQUEST, true, loanRequestConsumer);
+            loanClientAppGateway.sendLoanReply(new LoanReply(loanRequest.getId(), reply.getInterest(), reply.getQuoteId()));
+        });
 
-        Consumer bankInterestReplyConsumer = new DefaultConsumer(channel) {
-            @Override
-            public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
-                BankInterestReply reply = SerializationUtils.deserialize(body);
-                LoanRequest loanRequest = getLoanRequest(reply.getRequestId());
+        loanClientAppGateway = new LoanClientAppGateway();
+        loanClientAppGateway.onLoanRequestReceived(request -> {
+            add(request);
+            var bankInterestRequest = new BankInterestRequest(nextId++, request.getId(), request.getAmount(), request.getTime());
+            add(request, bankInterestRequest);
 
-                add(loanRequest, reply);
-
-                channel.basicPublish("", Queues.LOAN_REPLY, null, SerializationUtils.serialize(new LoanReply(loanRequest.getId(), reply.getInterest(), reply.getQuoteId())));
-            }
-        };
-        channel.basicConsume(Queues.BANK_INTEREST_REPLY, true, bankInterestReplyConsumer);
+            bankAppGateway.sendBankRequest(bankInterestRequest);
+        });
     }
 
     private JListLine getRequestReply(LoanRequest request) {
