@@ -1,5 +1,6 @@
 package nl.svendubbeld.fontys.bank;
 
+import nl.svendubbeld.fontys.Queues;
 import nl.svendubbeld.fontys.messaging.requestreply.RequestReply;
 import nl.svendubbeld.fontys.model.bank.BankInterestReply;
 import nl.svendubbeld.fontys.model.bank.BankInterestRequest;
@@ -25,14 +26,23 @@ public class JMSBankFrame extends JFrame {
 
     private LoanBrokerAppGateway loanBrokerAppGateway;
 
+    private final String name;
+    private final String queue;
+
     /**
      * Launch the application.
      */
     public static void main(String[] args) {
         EventQueue.invokeLater(() -> {
             try {
-                JMSBankFrame frame = new JMSBankFrame();
-                frame.setVisible(true);
+                var ingFrame = new JMSBankFrame("ING", Queues.ING_REQUEST);
+                ingFrame.setVisible(true);
+
+                var abnFrame = new JMSBankFrame("ABNAMRO", Queues.ABN_REQUEST);
+                abnFrame.setVisible(true);
+
+                var raboFrame = new JMSBankFrame("RABOBANK", Queues.RABO_REQUEST);
+                raboFrame.setVisible(true);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -41,9 +51,13 @@ public class JMSBankFrame extends JFrame {
 
     /**
      * Create the frame.
+     * @param name
+     * @param queue
      */
-    public JMSBankFrame() throws IOException, TimeoutException {
-        setTitle("JMS Bank - ABN AMRO");
+    public JMSBankFrame(String name, String queue) throws IOException, TimeoutException {
+        this.name = name;
+        this.queue = queue;
+        setTitle(String.format("JMS Bank - %s", name));
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         setBounds(100, 100, 450, 300);
         contentPane = new JPanel();
@@ -91,7 +105,7 @@ public class JMSBankFrame extends JFrame {
             var rr = list.getSelectedValue();
             var interest = Double.parseDouble((tfReply.getText()));
             if (rr != null) {
-                var reply = new BankInterestReply(rr.getRequest().getId(), interest, "ABN AMRO");
+                var reply = new BankInterestReply(rr.getRequest().getId(), interest, name);
                 rr.setReply(reply);
                 list.repaint();
 
@@ -108,7 +122,7 @@ public class JMSBankFrame extends JFrame {
         gbcBtnSendReply.gridy = 1;
         contentPane.add(btnSendReply, gbcBtnSendReply);
 
-        loanBrokerAppGateway = new LoanBrokerAppGateway();
+        loanBrokerAppGateway = new LoanBrokerAppGateway(queue);
 
         loanBrokerAppGateway.onBankInterestRequestReceived(request -> listModel.addElement(new RequestReply<>(request, null)));
     }

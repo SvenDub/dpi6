@@ -12,6 +12,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.concurrent.TimeoutException;
 
 public class LoanBrokerFrame extends JFrame {
@@ -73,19 +74,26 @@ public class LoanBrokerFrame extends JFrame {
         bankAppGateway = new BankAppGateway();
         bankAppGateway.onBankReplyReceived(reply -> {
             var loanRequest = getLoanRequest(reply.getRequestId());
+            var requestReply = getRequestReply(loanRequest);
 
             add(loanRequest, reply);
 
-            loanClientAppGateway.sendLoanReply(new LoanReply(loanRequest.getId(), reply.getInterest(), reply.getQuoteId()));
+            if (requestReply != null && requestReply.getBankReplies().size() == requestReply.getRequestsSent()) {
+                var lowest = requestReply.getBankReplies().stream().min(Comparator.comparingDouble(BankInterestReply::getInterest));
+
+                if (lowest.isPresent()) {
+                    loanClientAppGateway.sendLoanReply(new LoanReply(loanRequest.getId(), lowest.get().getInterest(), lowest.get().getQuoteId()));
+                }
+            }
         });
 
         loanClientAppGateway = new LoanClientAppGateway();
         loanClientAppGateway.onLoanRequestReceived(request -> {
             add(request);
             var bankInterestRequest = new BankInterestRequest(nextId++, request.getId(), request.getAmount(), request.getTime());
-            add(request, bankInterestRequest);
 
-            bankAppGateway.sendBankRequest(bankInterestRequest);
+            var requestCount = bankAppGateway.sendBankRequest(bankInterestRequest);
+            add(request, bankInterestRequest, requestCount);
         });
     }
 
@@ -105,11 +113,11 @@ public class LoanBrokerFrame extends JFrame {
         listModel.addElement(new JListLine(loanRequest));
     }
 
-
-    public void add(LoanRequest loanRequest, BankInterestRequest bankRequest) {
+    public void add(LoanRequest loanRequest, BankInterestRequest bankRequest, long requestCount) {
         JListLine rr = getRequestReply(loanRequest);
         if (rr != null && bankRequest != null) {
             rr.setBankRequest(bankRequest);
+            rr.setRequestsSent(requestCount);
             list.repaint();
         }
     }
@@ -117,7 +125,7 @@ public class LoanBrokerFrame extends JFrame {
     public void add(LoanRequest loanRequest, BankInterestReply bankReply) {
         JListLine rr = getRequestReply(loanRequest);
         if (rr != null && bankReply != null) {
-            rr.setBankReply(bankReply);
+            rr.addBankReply(bankReply);
             list.repaint();
         }
     }

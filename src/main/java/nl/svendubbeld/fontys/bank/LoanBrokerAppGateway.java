@@ -16,9 +16,9 @@ public class LoanBrokerAppGateway implements Closeable {
 
     private final MessageReceiverGateway<BankInterestRequest> receiverGateway;
 
-    public LoanBrokerAppGateway() {
+    public LoanBrokerAppGateway(String receiverQueue) {
         senderGateway = new MessageSenderGateway<>(Queues.BANK_INTEREST_REPLY);
-        receiverGateway = new MessageReceiverGateway<>(Queues.BANK_INTEREST_REQUEST);
+        receiverGateway = new MessageReceiverGateway<>(receiverQueue);
     }
 
     public void sendReply(BankInterestReply reply) throws IOException {
